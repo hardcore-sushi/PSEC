@@ -6,7 +6,7 @@ If you have some knowledge about cryptography I would be very happy to have your
 # PSEC Protocol
 ### Peer to peer Secure Ephemeral Communications
 
-PSEC protocol is a simplification/adaptation of TLS 1.3 for P2P networks. The goal is to provide an encrypted and authenticated secure transport layer for ephemeral P2P communications. PSEC should ensure deniability, forward secrecy, future secrecy and optional plain text length obfuscation. A reference implementation in rust can be found [here](https://github.com/hardcore-sushi/async-psec). If you think it doesn't, please inform me.
+PSEC protocol is a simplification/adaptation of TLS 1.3 for P2P networks. The goal is to provide an encrypted and authenticated secure transport layer for ephemeral P2P communications. PSEC should ensure deniability, forward secrecy, future secrecy and optional plain text length obfuscation. If you think it doesn't, please inform me. The reference implementation in rust can be found [here](https://github.com/hardcore-sushi/async-psec).
 
 Since there no central server in P2P communication, there is no certificate. Instead, peers use long term Ed25519 identity keys `idK` for authentication. And because there is no client/server model, a mutual consensus will be needed for some computations. This consensus is obtained by simply comparing received and sent bytes during the very first part of the handshake. The peer who sent the lowest value will get a boolean set to `true` and the other will have it set to `false`. It's like determining who will play the role of the server and who will play that of the client.
 
@@ -37,11 +37,23 @@ for i in range(64+32):
 ```
 
 ## Handshake Keys Derivation
-Alice will then compute the `handshake_secret` which is the output of the HKDF Extract operation on the `shared_secret` using the SHA384 hash function:
+Key derivation relies on [HKDF](https://en.wikipedia.org/wiki/HKDF), used with the SHA384 hash function. HKDF expand operation is wrapped in `HKDF_expand_label`. Here is an implementation of this function using the [hkdf library](https://pypi.org/project/hkdf) in python:
 ```python
-handshake_secret = HKDF_extract(
+# key: already cryptographically strong pseudorandom key (minimum of 48 bytes)
+# label: abritray string
+# context: abritrary binary data
+def HKDF_expand_label(key, label, context):
+    info = len(label).to_bytes(4, byteorder="big")+label.encode()
+    if context is not None:
+        info += len(context).to_bytes(4, byteorder="big")+context
+    return hkdf_expand(key, info=info, length=48, hash=hashlib.sha384)
+```
+
+Alice computes the `handshake_secret` which is the output of the HKDF Extract operation on the `shared_secret` using the SHA384 hash function:
+```python
+handshake_secret = hkdf_extract(
     salt=None,
-    ikm=shared_secret
+    input_key_material=shared_secret
 )
 ```
 This value is therefore common to Alice and Bob.
@@ -81,7 +93,7 @@ With this two secrets, Alice will be able to derive her encryption key and IV in
 local_handshake_key = HKDF_expand_label(
     key=local_handshake_traffic_secret,
     label="key",
-    context⁼None
+    context=None
 )
 
 local_handshake_iv = HKDF_expand_label(
@@ -186,9 +198,9 @@ derived_secret = HKDF_expand_label(
 ```
 From this `derived_secret`, a 48 bytes long `master_secret` is retreived:
 ```python
-master_secret = HKDF_extract(
+master_secret = hkdf_extract(
     salt=derived_secret,
-    ikm=""
+    input_key_material=""
 )
 ```
 Then, Alice compute her `local_application_traffic_secret` and `peer_application_traffic_secret` as follows:
