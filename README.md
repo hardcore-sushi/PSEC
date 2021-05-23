@@ -56,7 +56,7 @@ handshake_secret = hkdf_extract(
     input_key_material=shared_secret
 )
 ```
-This value is therefore common to Alice and Bob.
+This value is therefore common to Alice and Bob. Now, `shared_secret` can be deleted.
  
 She will also compute `handsake_hash`, a SHA384 hash of all previous messages sent through the connection. For Alice and Bob to have the same `handshake_hash`, the order of the messages in the hash input is determined by the mutual consensus.
 ```python
@@ -64,7 +64,7 @@ if i_play_the_role_of_the_server:
     ordered_bytes = bytes_received + bytes_sent
 else:
     ordered_bytes = bytes_sent + bytes_received
-handshake_hash = SHA384(ordered_bytes)
+handshake_hash = sha384(ordered_bytes).digest()
 ```
 With the `handshake_secret` and the `handshake_hash`, Alice computes the `local_handshake_traffic_secret` using the HKDF Expand Label function as follows:
 ```python
@@ -135,7 +135,7 @@ encrypted_auth_msg = AES_128_GCM.encrypt(
 |:----------------------:|:-----------:|
 |        96 bytes        |   16 bytes  |
 
-At this point, `local_handshake_key`, `local_handshake_iv`, `peer_handshake_key` and `peer_handshake_iv` can be deleted.
+At this point, `alice_ephK_pub`, `local_handshake_key` and `local_handshake_iv` can be deleted. Once Alice received and decrypted the Bob message, `peer_handshake_key` and `peer_handshake_iv` can be deleted too.
 
 Bob will do the same and Alice will verify whether the ephemeral public key `bob_ephK_pub` sent by Bob earlier match the received signature. If they don't match, the handshake is aborted. Otherwise, Alice can check if the Bob's identity public key `bob_idK_pub` is already known and matches one of her contacts or if Bob is a new unknown person.
 ```python
@@ -143,11 +143,12 @@ if ed_22519_verify(
     public_key=bob_idK_pub,
     data=bob_ephK_pub
 ):
-    is_already_known(bob_idK_pub)
+    check_if_already_known(bob_idK_pub)
     # continue handshake
 else:
     # abort handshake
 ```
+Once verified, `bob_ephK_pub` can be deleted.
 
 ## Handshake finished
 A new hash of the handshake is computed to include the authentication step. Alice will then compute a HMAC of this hash to agree with Bob that the handshake has not been corrupted. The 48 bytes long HMAC key is computed using HKDF Expand Label:
@@ -164,6 +165,8 @@ local_handshake_finished = HMAC(
     data=handshake_hash
 )
 ```
+After this, `local_handshake_traffic_secret` can be deleted.
+
 Alice sends the HMAC output `local_handshake_finished` in __plain text__ and receives the Bob's one.
 | HMAC output |
 |:-----------:|
@@ -185,10 +188,10 @@ peer_handshake_finished = HMAC(
 
 assert(received_handshake_finished == peer_handshake_finished)
 ```
-If the Bob's HMAC and the computed `peer_handshake_finished` don't match, the handshake is aborted.
+`peer_handshake_traffic_secret` can be deleted. If the Bob's HMAC and the computed `peer_handshake_finished` don't match, the handshake is aborted.
 
 ## Application Keys Derivation
-Once Alice and Bob agreed that the handshake was valid, they will compute the keys that will be used to send application data. First, Alice computes a 48 bytes long `derived_secret`:
+Once Alice and Bob agreed that the handshake was valid, they will compute the keys that will be used to send application data. First, Alice computes a 48 bytes long `derived_secret` from the previous `handshake_secret`:
 ```python
 derived_secret = HKDF_expand_label(
     key=handshake_secret,
@@ -196,14 +199,14 @@ derived_secret = HKDF_expand_label(
     context=None
 )
 ```
-From this `derived_secret`, a 48 bytes long `master_secret` is retreived:
+Now, `handshake_secret` can be deleted. From this `derived_secret`, a 48 bytes long `master_secret` is retreived:
 ```python
 master_secret = hkdf_extract(
     salt=derived_secret,
     input_key_material=""
 )
 ```
-Then, Alice compute her `local_application_traffic_secret` and `peer_application_traffic_secret` as follows:
+Then, `derived_secret` can be deleted and Alice computes her `local_application_traffic_secret` and `peer_application_traffic_secret` as follows:
 ```python
 local_application_traffic_secret = HKDF_expand_label(
     key=master_secret,
@@ -217,7 +220,9 @@ peer_application_traffic_secret = HKDF_expand_label(
     context=handshake_hash
 )
 ```
-`application_local_label` and `application_peer_label` also depend on the mutual consensus and are unique to this step:
+The `handshake_hash` is the same as in the [handshake verification step](#handshake-finished). Therefore, it doesn't include the verification HMACs.
+
+`application_local_label` and `application_peer_label` depend on the mutual consensus and are unique to this step:
 ```python
 application_local_label = "application_i_am_"
 application_peer_label = "application_i_am_"
@@ -228,6 +233,7 @@ else:
     application_local_label += "alice"
     application_peer_label += "bob"
 ```
+At this point, `master_secret` can be deleted.
 
 Application encryption keys and IVs are finally derived from the two secrets in the same way as the handshake's ones:
 ```python
@@ -245,8 +251,10 @@ local_application_iv = HKDF_expand_label(
 ```
 The Bob's key and IV are obtained by replacing `local_application_traffic_secret` with `peer_application_traffic_secret`. Keys and IVs lengths are the same as the handshake's ones.
 
+Once application keys are derived, `local_application_traffic_secret` and `peer_application_traffic_secret` can be deleted.
+
 ## Secure communication
-The handshake is finished. Alice and Bob can now talk securely using AES-GCM 128 bits. At this point, every messages are sent encrypted. AES-GCM nonces are obtained by XORing a 8 bytes counter to the last 8 bytes of the IV. The counter is specific to the IV. It's initialized to 0 and incremented by 1 with each use. Here is a python implementation of this nonce generation:
+At this point, the handshake is finished. Alice and Bob can now talk securely using AES-GCM 128 bits. From now on, every messages are sent encrypted. AES-GCM nonces are obtained by XORing a 8 bytes counter to the last 8 bytes of the IV. The counter is specific to the IV. It's initialized to 0 and incremented by 1 with each use. Here is a python implementation of this nonce generation:
 ```python
 def iv_to_nonce(iv, counter):
     counter_bytes = b"\x00"*4 + counter.to_bytes(8, byteorder="big")
