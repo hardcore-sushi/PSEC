@@ -3,6 +3,8 @@ I'm not a professional cryptographer. This protocol is very new and didn't recei
 
 If you have some knowledge about cryptography I would be very happy to have your feedback. If you find weaknesses or if you think it's secure, please tell me.
 
+PSEC is currently in alpha stage, at version 0.3. There is no guarantee that any version is compatible with previous ones. Be ready to make some changes to your code if you decide to implement the protocol right now.
+
 # PSEC Protocol
 ### Peer to peer Secure Ephemeral Communications
 
@@ -107,21 +109,16 @@ She will also do this operations with `peer_handshake_traffic_secret` as the _ke
 Now, Alice and Bob can start talking using AES-GCM 128 bits encryption. They will encrypt with `local_handshake_key` and decrypt with `peer_handshake_key`. Keys are 16 bytes long (128 bits), IV 12 bytes long (96 bits) and GCM tags 16 bytes long (128 bits).
 
 ## Authentication
-Alice will first send again 64 random bytes, in __plain text__.
-| random |
-|:------:|
-|64 bytes|
-
-Then, she will send her identity public key `alice_idK_pub` and a signature of his ephemeral public key `alice_ephK_pub` used at the first stage of the handshake.
+Alice will create a message composed of new 64 random bytes, her long-term identity public key `alice_idK_pub` and a signature of his ephemeral public key `alice_ephK_pub` used at the first stage of the handshake.
 ```python
-auth_msg = alice_idK_pub + ed25519_sign(
+auth_msg = os.urandom(64) + alice_idK_pub + ed25519_sign(
     private_key=alice_idK_priv,
     data=alice_ephK_pub
 )
 ```
-| identity public key | signature of the ephemeral public key |
-|:-------------------:|:-------------------------------------:|
-|       32 bytes      |                64 bytes               |
+|  random  | identity public key | signature of the ephemeral public key |
+|:--------:|:-------------------:|:-------------------------------------:|
+| 64 bytes |       32 bytes      |                64 bytes               |
 
 This message is first encrypted with the previous derived handshake keys before being sent. The AES-GCM nonces are just the plain IVs as the handshake keys are only used once.
 ```python
@@ -133,7 +130,7 @@ encrypted_auth_msg = AES_128_GCM.encrypt(
 ```
 | encrypted auth message | AES-GCM tag |
 |:----------------------:|:-----------:|
-|        96 bytes        |   16 bytes  |
+|        160 bytes       |   16 bytes  |
 
 At this point, `alice_ephK_pub`, `local_handshake_key` and `local_handshake_iv` can be deleted. Once Alice received and decrypted the Bob message, `peer_handshake_key` and `peer_handshake_iv` can be deleted too.
 
