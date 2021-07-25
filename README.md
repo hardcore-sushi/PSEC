@@ -8,7 +8,7 @@ PSEC is currently in alpha stage, at version 0.4. There is no guarantee that any
 # PSEC Protocol
 ### Peer to peer Secure Ephemeral Communications
 
-PSEC protocol is a simplification/adaptation of TLS 1.3 for P2P networks. The goal is to provide an encrypted and authenticated secure transport layer for ephemeral P2P communications. PSEC should ensure deniability, forward secrecy, future secrecy and optional plain text length obfuscation. If you think it doesn't, please inform me. The reference implementation in rust can be found [here](https://github.com/hardcore-sushi/async-psec).
+PSEC protocol is a simplification/adaptation of TLS 1.3 for P2P networks. The goal is to provide an encrypted and authenticated secure transport layer for ephemeral P2P communications. PSEC should ensure message deniability, forward & future secrecy between communications, and optional plain text length obfuscation. If you think it doesn't, please inform me. The reference implementation in rust can be found [here](https://github.com/hardcore-sushi/async-psec).
 
 Since there no central server in P2P communication, there is no certificate. Instead, peers use long term Ed25519 identity keys `idK` for authentication. And because there is no client/server model, a mutual consensus will be needed for some computations. This consensus is obtained by simply comparing received and sent bytes during the very first part of the handshake. The peer who sent the lowest value will get a boolean set to `true` and the other will have it set to `false`. It's like determining who will play the role of the server and who will play that of the client.
 
