@@ -3,7 +3,7 @@ I'm not a professional cryptographer. This protocol is very new and didn't recei
 
 If you have some knowledge about cryptography I would be very happy to have your feedback. If you find weaknesses or if you think it's secure, please tell me.
 
-PSEC is currently in alpha stage, at version 0.3. There is no guarantee that any version is compatible with previous ones. Be ready to make some changes to your code if you decide to implement the protocol right now.
+PSEC is currently in alpha stage, at version 0.4. There is no guarantee that any version is compatible with previous ones. Be ready to make some changes to your code if you decide to implement the protocol right now.
 
 # PSEC Protocol
 ### Peer to peer Secure Ephemeral Communications
@@ -261,38 +261,41 @@ def iv_to_nonce(iv, counter):
 If Alice wants to obfuscate the lengths of her message, she can use PSEC padding on the plain text: she first encodes the real length of her message (4 bytes, big endian) and prefix it to the plain text. She does this so that Bob is able to distinguish the real plain text from the padding. Then, she will append random padding until the total length reach 1000 bytes. If this value is lower than the plain text length, it's multiplied by 2 until the plain text can fit. Here is a python implementation of this padding algorithm:
 ```python
 plain_text = b"Hello Bob !"
-plain_text_encoded_length = len(plain_text).to_bytes(4, byteorder="big")
+encoded_plain_text_length = len(plain_text).to_bytes(4, byteorder="big")
 
-total_length = 1000
-while total_length < len(plain_text) + len(plain_text_encoded_length):
-    total_length = total_length * 2
+padded_length = 1000
+while padded_length < len(encoded_plain_text_length) + len(plain_text):
+    padded_length = padded_length * 2
 
-padding_length = total_length - len(plain_text) - len(plain_text_encoded_length)
-padded_message = plain_text_encoded_length + plain_text + os.urandom(padding_length)
+padding_length = padded_length - len(encoded_plain_text_length) - len(plain_text)
+padded_message = encoded_plain_text_length + plain_text + os.urandom(padding_length)
 ```
 
 This padding process is optional. If Alice has a limited bandwidth, she can decide not to pad her messages. In this case, she will just prepend the encoded message length to the plain text so that Bob can use the same algorithm to decode her messages.
 
 | encoded real length | real message |     random padding     |
-|:-------------------:|:------------:|------------------------|
+|:-------------------:|:------------:|:----------------------:|
 |       4 bytes       |    X bytes   | `padding_length` bytes |
 
-Once the plain text is ready to be sent, Alice encrypts it with her `local_application_key`. The AES GCM nonce is computed from `local_application_iv` in the way described above. Alice add the plain text length (`total_length`) as an additional associated data (AAD) to the AES GCM encrypt function (encoded to 4 bytes in big endian). Therefore, message lengths are authenticated and cannot be tampered.
+Once the plain text is ready to be sent, Alice encrypts it with her `local_application_key`. The AES GCM nonce is computed from `local_application_iv` in the way described above. Alice add the cipher text length (including GCM tag) as an additional associated data (AAD) to the AES GCM encrypt function (encoded to 4 bytes in big endian). Therefore, message lengths are authenticated and cannot be tampered. \
+_Note: due to this 4 bytes length, messages cannot be larger than 4 294 967 295 bytes (≈4GB)_.
 ```python
+GCM_TAG_LENGTH = 16
+encoded_length = (len(padded_message)+GCM_TAG_LENGTH).to_bytes(4, byteorder="big")
 nonce = iv_to_nonce(local_counter)
 local_counter += 1
 cipher_text = AES_128_GCM.encrypt(
     key=local_application_key,
     nonce=nonce,
     plain_text=padded_message,
-    aad=len(padded_message).to_bytes(4, byteorder="big")
+    aad=encoded_length
 )
 ```
-| encoded length |      cipher text     | AES GCM tag |
-|:--------------:|:--------------------:|-------------|
-|     4 bytes    | `total_length` bytes | 16 bytes    |
+| encoded length |      cipher text      | AES GCM tag |
+|:--------------:|:---------------------:|:-----------:|
+|     4 bytes    | `padded_length` bytes |   16 bytes  |
 
-When Alice receive a message, she reads the first 4 bytes to get the message length and then wait for the full message to be received. Note that the encoded length doesn't include the AES-GCM tag so Alice must add 16 (the length of the tag) to get the total length of the cipher text. Once the exact amout of bytes is received, Alice can decrypt the message with her `peer_application_key` and verify the authenticity of the message (length and content).
+When Alice receives a message, she reads the first 4 bytes to get the message length and waits for the exact amout of bytes to be received. Then she decrypts the message with her `peer_application_key` and verifies its authenticity (length and content).
 ```python
 nonce = iv_to_nonce(peer_counter)
 peer_counter += 1
